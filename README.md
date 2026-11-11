@@ -1,5 +1,3 @@
-<div align="center">
-
 ![Hermes CoBrowse — Spatial Canvas Studio](assets/banner.jpg)
 
 # Hermes CoBrowse
@@ -10,8 +8,6 @@
 [![Hermes Plugin](https://img.shields.io/badge/Hermes%20Plugin-%3E%3D0.22.0-1d1d1f?style=flat-square)](plugin.yaml)
 [![Runtime](https://img.shields.io/badge/Engine-Playwright%20%2B%20CDP-28cd41?style=flat-square)](hermes_cobrowse/engine.py)
 [![License: MIT](https://img.shields.io/badge/License-MIT-515154?style=flat-square)](pyproject.toml)
-
-</div>
 
 ---
 
@@ -190,6 +186,25 @@ python tests/test_e2e.py
 
 ---
 
+## Screenshots
+
+![Multi-Window Spatial Canvas](docs/screenshots/spatial-multiwindow.png)
+![Live 2FA Human Handoff Banner](docs/screenshots/2fa-handoff.png)
+![Floating Inspector Studio & On-Page DOM Highlight](docs/screenshots/inspector-dom.png)
+
+---
+
+## Security & Runtime Disclosures
+
+In accordance with Hermes Plugin Catalog guidelines:
+
+- **Background Browser & Local Gateway:** Calling `cobrowse_open` launches headless Chromium processes via Playwright (`--disable-blink-features=AutomationControlled`, `--no-sandbox`) and starts a background FastAPI/Uvicorn WebSocket server bound strictly to loopback `127.0.0.1` (default port `9876`, auto-incremented if busy) until `cobrowse_close` is invoked without a `session_id` or the host process exits.
+- **Network Requests & Page Telemetry:** Headless Chromium visits target URLs instructed by the agent or user and streams JPEG screenshots, visible interactive DOM metadata, console logs, and HTTP request summaries in memory to local `/ws/studio` clients. No analytics, update checks, or third-party telemetry are transmitted externally.
+- **JavaScript Evaluation:** `cobrowse_eval_js` evaluates agent-supplied JavaScript inside the active browser page context only.
+- **Credentials & Unattended Runs:** The plugin reads no `.env` files, `auth.json`, OS keychains, or external browser profiles. `cobrowse_request_handoff` enforces a finite timeout (`1`–`900` seconds) and returns cleanly (`unattended_abort`) when `HERMES_UNATTENDED`, `HERMES_CRON`, or `HERMES_NONINTERACTIVE` is set without an active viewer so cron and gateway runs never hang.
+
+---
+
 ## Project Layout
 
 ```text
@@ -200,6 +215,8 @@ Hermes-CoBrowse/
 ├── run_demo.py                   # Interactive dual-control + 2FA demo runner
 ├── assets/
 │   └── banner.jpg                # Spatial Canvas Studio hero banner
+├── docs/
+│   └── screenshots/              # Verified live UI screenshots for docs & catalog
 ├── demo_portal/
 │   └── app.py                    # Local Apex Cloud 2FA demo FastAPI application
 ├── plugin-catalog/

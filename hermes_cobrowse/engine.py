@@ -330,7 +330,6 @@ class BrowserEngine:
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
-                    "--disable-web-security",
                 ],
             )
 

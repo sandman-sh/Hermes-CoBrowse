@@ -422,15 +422,37 @@ def handle_type(params: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         return json.dumps({"status": "error", "error": str(e)})
 
 
+def _is_unattended_env() -> bool:
+    import os
+    return any(
+        str(os.environ.get(k, "")).strip().lower() in ("1", "true", "yes")
+        for k in ("HERMES_UNATTENDED", "HERMES_CRON", "HERMES_NONINTERACTIVE")
+    )
+
+
 def handle_request_handoff(params: Optional[Dict[str, Any]] = None, **kwargs) -> str:
     try:
         args = _extract_params(params, **kwargs)
         reason = args.get("reason", "Human verification required")
         guidance = args.get("guidance", "Please resolve the verification on the screen.")
-        timeout_sec = int(args.get("timeout_seconds", 300))
+        raw_timeout = int(args.get("timeout_seconds", 300))
+        timeout_sec = max(1, min(raw_timeout, 900))
 
         mgr = CoBrowseManager.get_instance()
         eng = _get_target_engine(mgr, args.get("session_id"))
+
+        # Respect unattended/cron runs: avoid waiting up to timeout when no interactive viewer is connected.
+        has_viewer = bool(
+            mgr.server
+            and (mgr.server.studio_websockets or mgr.server.stream_websockets)
+        )
+        if _is_unattended_env() and not has_viewer:
+            return json.dumps({
+                "status": "unattended_abort",
+                "message": "Human handoff skipped cleanly in unattended mode without an active Spatial Canvas viewer.",
+                "reason": reason,
+            })
+
         res = mgr.run_async(
             eng.request_human_intervention(
                 reason=reason,

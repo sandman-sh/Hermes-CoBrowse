@@ -78,8 +78,8 @@ class CoBrowseServer:
         self.app = FastAPI(title="Hermes CoBrowse Spatial Canvas Gateway")
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
+            allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$",
+            allow_credentials=False,
             allow_methods=["*"],
             allow_headers=["*"],
         )

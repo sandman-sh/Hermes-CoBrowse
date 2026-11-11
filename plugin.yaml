@@ -1,7 +1,7 @@
 name: hermes-cobrowse
 version: "1.0.0"
 description: "Real-time multi-window spatial co-browsing canvas and interactive human-in-the-loop web automation for Hermes Agent and Desktop."
-maintainer: NousResearchCommunity
+maintainer: sandman-sh
 tier: community
 category: desktop
 requires_hermes: ">=0.22.0"

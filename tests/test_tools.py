@@ -20,6 +20,7 @@ from hermes_cobrowse.tools import (
     handle_get_state,
     handle_navigate,
     handle_open,
+    handle_request_handoff,
     handle_scroll,
 )
 
@@ -166,6 +167,18 @@ def test_tool_invocations_and_server():
     # 7. cobrowse_scroll
     scroll_res = json.loads(handle_scroll({"direction": "down", "amount": 200}))
     assert scroll_res.get("status") == "scrolled"
+
+    # 7b. cobrowse_request_handoff aborts cleanly in unattended mode (no viewer)
+    os.environ["HERMES_UNATTENDED"] = "1"
+    try:
+        unattended_res = json.loads(handle_request_handoff({
+            "reason": "Simulated unattended 2FA gate",
+            "timeout_seconds": 30,
+        }))
+        assert unattended_res.get("status") == "unattended_abort", unattended_res
+    finally:
+        os.environ.pop("HERMES_UNATTENDED", None)
+    print("  [✓] Unattended 2FA handoff guard verified.")
 
     # 8. cobrowse_close and clean re-open
     close_res = json.loads(handle_close({}))

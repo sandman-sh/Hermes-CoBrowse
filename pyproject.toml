@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
-    { name = "Nous Research Community" }
+    { name = "sandman-sh" }
 ]
 keywords = ["hermes", "hermes-agent", "playwright", "cdp", "co-browsing", "human-in-the-loop", "2fa", "spatial-canvas"]
 classifiers = [

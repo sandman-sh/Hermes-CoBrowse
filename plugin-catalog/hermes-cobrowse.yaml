@@ -1,13 +1,22 @@
+# Template catalog entry for NousResearch/hermes-agent (plugin-catalog/hermes-cobrowse.yaml).
+# Replace <PINNED_40_CHAR_COMMIT_SHA> with the exact 40-char commit SHA from `git rev-parse HEAD` before opening the catalog PR.
 name: hermes-cobrowse
 repo: https://github.com/sandman-sh/Hermes-CoBrowse
-sha: main
-subdir: ''
+sha: "<PINNED_40_CHAR_COMMIT_SHA>"
+subdir: ""
+title: "Hermes CoBrowse"
+description: "Real-time multi-window spatial co-browsing canvas and interactive human-in-the-loop web automation for Hermes Agent and Desktop with CDP screencasting, 8-way window resizing, Inspector Studio telemetry, and 2FA handoff. Disclosure — launches headless Chromium processes via Playwright and runs a local loopback HTTP/WebSocket server on 127.0.0.1:9876+; navigates to agent-supplied URLs and executes agent-supplied JS via cobrowse_eval_js; reads no local credentials or .env files and sends no external analytics."
+maintainer: sandman-sh
 tier: community
 category: desktop
 requires_hermes: ">=0.22.0"
 version: "1.0.0"
-title: "Hermes CoBrowse"
-description: "Real-time multi-window spatial co-browsing canvas and interactive human-in-the-loop web automation for Hermes Agent and Desktop with low-latency CDP screencasting, dynamic window orchestration, and 2FA handoff."
+docs_url: https://github.com/sandman-sh/Hermes-CoBrowse#readme
+image: https://raw.githubusercontent.com/sandman-sh/Hermes-CoBrowse/<PINNED_40_CHAR_COMMIT_SHA>/assets/banner.jpg
+screenshots:
+  - https://raw.githubusercontent.com/sandman-sh/Hermes-CoBrowse/<PINNED_40_CHAR_COMMIT_SHA>/docs/screenshots/spatial-multiwindow.png
+  - https://raw.githubusercontent.com/sandman-sh/Hermes-CoBrowse/<PINNED_40_CHAR_COMMIT_SHA>/docs/screenshots/2fa-handoff.png
+  - https://raw.githubusercontent.com/sandman-sh/Hermes-CoBrowse/<PINNED_40_CHAR_COMMIT_SHA>/docs/screenshots/inspector-dom.png
 readme: true
 platforms: []
 capabilities:
@@ -24,4 +33,4 @@ capabilities:
   provides_hooks:
     - post_tool_call
   provides_middleware: []
-requires_env: []
+  requires_env: []
