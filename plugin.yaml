@@ -1,0 +1,23 @@
+name: hermes-cobrowse
+version: "1.0.0"
+description: "Real-time multi-window spatial co-browsing canvas and interactive human-in-the-loop web automation for Hermes Agent and Desktop."
+maintainer: NousResearchCommunity
+tier: community
+category: desktop
+requires_hermes: ">=0.22.0"
+title: "Hermes CoBrowse"
+platforms: []
+provides_tools:
+  - cobrowse_open
+  - cobrowse_navigate
+  - cobrowse_get_state
+  - cobrowse_click
+  - cobrowse_type
+  - cobrowse_request_handoff
+  - cobrowse_scroll
+  - cobrowse_eval_js
+  - cobrowse_close
+provides_hooks:
+  - post_tool_call
+provides_middleware: []
+requires_env: []

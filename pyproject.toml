@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-cobrowse"
+version = "1.0.0"
+description = "Real-time multi-window spatial co-browsing canvas and interactive human-in-the-loop web automation for Hermes Agent and Desktop."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Nous Research Community" }
+]
+keywords = ["hermes", "hermes-agent", "playwright", "cdp", "co-browsing", "human-in-the-loop", "2fa", "spatial-canvas"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "playwright>=1.40.0,<2.0.0",
+    "fastapi>=0.100.0,<1.0.0",
+    "uvicorn>=0.20.0,<1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/sandman-sh/Hermes-CoBrowse"
+Repository = "https://github.com/sandman-sh/Hermes-CoBrowse"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hermes_cobrowse*"]
+
+[tool.setuptools.package-data]
+hermes_cobrowse = ["web/*"]
