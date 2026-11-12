@@ -1,7 +1,7 @@
 """FastAPI + WebSocket Streaming Server for Hermes CoBrowse.
 
 Streams high-FPS CDP screencast frames for single or multiple concurrent browser
-windows to the Hermes Desktop Spatial Canvas, relays bidirectional user input
+windows to the Spatial Canvas Studio, relays bidirectional user input
 and window commands, and coordinates human intervention handoffs.
 """
 
@@ -9,13 +9,15 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import socket
 import threading
 from typing import Any, Dict, Optional, Set
-from fastapi import Body, FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 import uvicorn
 
 from hermes_cobrowse.engine import BrowserEngine
@@ -63,7 +65,13 @@ class _SingleEngineAdapter:
 class CoBrowseServer:
     """Encapsulates the FastAPI application, multi-window WebSocket hubs, and Studio REST API."""
 
-    def __init__(self, manager_or_engine: Any, host: str = "127.0.0.1", port: int = 9876):
+    def __init__(
+        self,
+        manager_or_engine: Any,
+        host: str = "127.0.0.1",
+        port: int = 9876,
+        auth_token: Optional[str] = None,
+    ):
         if isinstance(manager_or_engine, BrowserEngine):
             self.manager = _SingleEngineAdapter(manager_or_engine)
         else:
@@ -71,17 +79,36 @@ class CoBrowseServer:
 
         self.host = host
         self.port = port
+        self.auth_token: str = auth_token or secrets.token_urlsafe(32)
         self.stream_websockets: Dict[WebSocket, Optional[str]] = {}
         self.studio_websockets: Set[WebSocket] = set()
         self._attached_listeners: Dict[str, tuple] = {}
 
         self.app = FastAPI(title="Hermes CoBrowse Spatial Canvas Gateway")
+
+        @self.app.middleware("http")
+        async def _enforce_http_auth(request: Request, call_next):
+            path = request.url.path
+            if request.method == "OPTIONS":
+                return await call_next(request)
+            if path.startswith("/static/") or path == "/favicon.ico":
+                return await call_next(request)
+            if not self._is_token_valid(self._extract_http_token(request)):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return await call_next(request)
+
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$",
+            allow_origin_regex=rf"^https?://(127\.0\.0\.1|localhost|\[::1\])(:{self.port})?$",
             allow_credentials=False,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["Content-Type", "X-CoBrowse-Token", "Authorization"],
+        )
+        # Outermost middleware: reject DNS-rebinding Host headers on both HTTP and WebSocket scopes
+        self.app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=["127.0.0.1", "localhost", "[::1]"],
+            www_redirect=False,
         )
 
         self._server: Optional[uvicorn.Server] = None
@@ -151,6 +178,42 @@ class CoBrowseServer:
     def _resolve_engine(self, session_id: Optional[str] = None) -> Optional[BrowserEngine]:
         return self.manager.get_session(session_id)
 
+    def _is_token_valid(self, supplied: Optional[str]) -> bool:
+        return bool(supplied) and secrets.compare_digest(str(supplied), self.auth_token)
+
+    def _extract_token_from_mapping(self, headers: Any, query_params: Any) -> str:
+        tok = headers.get("x-cobrowse-token")
+        if tok:
+            return str(tok).strip()
+        auth = str(headers.get("authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        q_tok = query_params.get("token")
+        return str(q_tok).strip() if q_tok else ""
+
+    def _extract_http_token(self, request: Request) -> str:
+        return self._extract_token_from_mapping(request.headers, request.query_params)
+
+    def _allowed_ws_origins(self) -> Set[str]:
+        return {
+            f"http://127.0.0.1:{self.port}",
+            f"http://localhost:{self.port}",
+            f"http://[::1]:{self.port}",
+        }
+
+    async def _authorize_websocket(self, websocket: WebSocket) -> bool:
+        origin = (websocket.headers.get("origin") or "").strip()
+        if origin not in self._allowed_ws_origins():
+            logger.warning(f"Rejected WebSocket connection with disallowed Origin: {origin!r}")
+            await websocket.close(code=1008)
+            return False
+        token = self._extract_token_from_mapping(websocket.headers, websocket.query_params)
+        if not self._is_token_valid(token):
+            logger.warning("Rejected unauthenticated WebSocket connection.")
+            await websocket.close(code=1008)
+            return False
+        return True
+
     def _setup_routes(self):
         static_dir = os.path.join(os.path.dirname(__file__), "web")
         if not os.path.exists(static_dir):
@@ -206,6 +269,8 @@ class CoBrowseServer:
                 return JSONResponse({"error": "No active browser session"}, status_code=404)
             try:
                 return await eng.navigate(url)
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
             except Exception as e:
                 return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -241,6 +306,8 @@ class CoBrowseServer:
                     force_new=True,
                 )
                 return res
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
             except Exception as e:
                 return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -271,6 +338,8 @@ class CoBrowseServer:
                 return JSONResponse({"error": "Missing url"}, status_code=400)
             try:
                 return await eng.navigate(url)
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
             except Exception as e:
                 return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -379,6 +448,8 @@ class CoBrowseServer:
 
         @self.app.websocket("/ws/stream")
         async def websocket_stream_endpoint(websocket: WebSocket, session_id: Optional[str] = Query(default=None)):
+            if not await self._authorize_websocket(websocket):
+                return
             await websocket.accept()
 
             try:
@@ -444,6 +515,8 @@ class CoBrowseServer:
 
         @self.app.websocket("/ws/studio")
         async def websocket_studio_endpoint(websocket: WebSocket):
+            if not await self._authorize_websocket(websocket):
+                return
             await websocket.accept()
 
             try:
@@ -552,5 +625,8 @@ class CoBrowseServer:
             for dead in dead_sockets:
                 self.stream_websockets.pop(dead, None)
 
-    def get_preview_url(self) -> str:
+    def get_base_url(self) -> str:
         return f"http://{self.host}:{self.port}"
+
+    def get_preview_url(self) -> str:
+        return f"http://{self.host}:{self.port}/?token={self.auth_token}"

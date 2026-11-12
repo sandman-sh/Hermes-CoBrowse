@@ -4,7 +4,9 @@ import importlib.util
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
+from urllib.parse import parse_qs, urlsplit
 import yaml
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -14,6 +16,7 @@ from fastapi.testclient import TestClient
 from demo_portal.app import portal_app
 from hermes_cobrowse import register
 from hermes_cobrowse.tools import (
+    CoBrowseManager,
     handle_click,
     handle_close,
     handle_eval_js,
@@ -27,9 +30,46 @@ from hermes_cobrowse.tools import (
 
 import websocket
 
-def _verify_websocket_stream(preview_url: str):
-    ws_url = preview_url.replace("http://", "ws://") + "/ws/stream"
-    ws = websocket.create_connection(ws_url, timeout=5)
+
+def _parse_preview_url(preview_url: str):
+    parts = urlsplit(preview_url)
+    base_http = f"{parts.scheme}://{parts.netloc}"
+    token = parse_qs(parts.query).get("token", [""])[0]
+    assert token, f"Missing auth token in preview_url: {preview_url}"
+    return base_http, token
+
+
+def _verify_websocket_security_and_stream(preview_url: str):
+    base_http, token = _parse_preview_url(preview_url)
+    ws_base = base_http.replace("http://", "ws://")
+
+    # 1. Missing token rejected
+    for bad_ws in (
+        f"{ws_base}/ws/stream",
+        f"{ws_base}/ws/stream?token=invalid-token",
+        f"{ws_base}/ws/studio?token=invalid-token",
+    ):
+        rejected = False
+        try:
+            c = websocket.create_connection(bad_ws, origin=base_http, timeout=3)
+            c.close()
+        except Exception:
+            rejected = True
+        assert rejected, f"Unauthenticated WS should be rejected: {bad_ws}"
+
+    # 2. Valid token with evil/missing Origin rejected
+    for bad_origin in (None, "https://evil.example"):
+        rejected = False
+        try:
+            kw = {"origin": bad_origin} if bad_origin else {"suppress_origin": True}
+            c = websocket.create_connection(f"{ws_base}/ws/stream?token={token}", timeout=3, **kw)
+            c.close()
+        except Exception:
+            rejected = True
+        assert rejected, f"Disallowed Origin should be rejected: {bad_origin!r}"
+
+    # 3. Valid token + valid localhost Origin succeeds
+    ws = websocket.create_connection(f"{ws_base}/ws/stream?token={token}", origin=base_http, timeout=5)
     try:
         init_msg = json.loads(ws.recv())
         assert init_msg["type"] == "init"
@@ -41,7 +81,7 @@ def _verify_websocket_stream(preview_url: str):
         assert takeover_msg["type"] == "takeover_status" and takeover_msg["enabled"] is True
     finally:
         ws.close()
-    print("  [✓] Real WebSocket /ws/stream init, JPEG frame, and takeover_toggle verified.")
+    print("  [✓] WebSocket token + Origin checks, init, JPEG frame, and takeover_toggle verified.")
 
 
 class MockContext:
@@ -68,6 +108,7 @@ def test_registration_and_manifest():
     assert manifest["name"] == "hermes-cobrowse"
     assert "provides_tools" in manifest and len(manifest["provides_tools"]) == 9
     assert "post_tool_call" in manifest["provides_hooks"]
+    assert manifest["config_schema"]["allow_private_networks"]["default"] is False
 
     # Load root __init__.py the same way Hermes plugin loader does
     root_init = os.path.join(PROJECT_ROOT, "__init__.py")
@@ -115,29 +156,54 @@ def test_demo_portal_routes():
 
 
 def test_tool_invocations_and_server():
-    print("[*] Testing Tool Handlers, Server HTTP/WS endpoints, and lifecycle...")
+    print("[*] Testing Tool Handlers, Auth/Host/Origin security, Server endpoints, and lifecycle...")
 
     # 1. cobrowse_open
     open_res = json.loads(handle_open({"url": "about:blank", "viewport_width": 1024, "viewport_height": 768}))
     assert open_res.get("status") in ["started", "already_running"]
     preview_url = open_res.get("preview_url")
     assert preview_url and preview_url.startswith("http://127.0.0.1:")
-    print(f"  [✓] cobrowse_open succeeded immediately: {preview_url}")
+    base_http, token = _parse_preview_url(preview_url)
+    print(f"  [✓] cobrowse_open succeeded with tokenized preview_url: {base_http}/?token=***")
 
-    # 2. Verify HTTP endpoints are immediately listening (no startup race!)
-    with urllib.request.urlopen(f"{preview_url}/health", timeout=3) as resp:
+    # 2. Verify unauthenticated HTTP requests & bad Host headers are rejected
+    for unauth_url in (f"{base_http}/health", f"{base_http}/api/sessions", f"{base_http}/api/state"):
+        got_401 = False
+        try:
+            urllib.request.urlopen(unauth_url, timeout=3)
+        except urllib.error.HTTPError as e:
+            got_401 = (e.code == 401)
+        assert got_401, f"Expected 401 without token on {unauth_url}"
+
+    bad_host_req = urllib.request.Request(
+        f"{base_http}/health?token={token}",
+        headers={"Host": "evil.example:9878"},
+    )
+    got_400 = False
+    try:
+        urllib.request.urlopen(bad_host_req, timeout=3)
+    except urllib.error.HTTPError as e:
+        got_400 = (e.code == 400)
+    assert got_400, "Expected 400 Invalid host header for DNS rebinding test"
+
+    # Authenticated HTTP endpoints work cleanly
+    with urllib.request.urlopen(urllib.request.Request(f"{base_http}/health", headers={"X-CoBrowse-Token": token}), timeout=3) as resp:
         health = json.loads(resp.read().decode("utf-8"))
         assert health["status"] == "healthy"
         assert health["running"] is True
 
-    # Verify empty POST /api/resume works without 422
-    req = urllib.request.Request(f"{preview_url}/api/resume", data=b"", method="POST")
+    req = urllib.request.Request(
+        f"{base_http}/api/resume",
+        data=b"",
+        headers={"X-CoBrowse-Token": token},
+        method="POST",
+    )
     with urllib.request.urlopen(req, timeout=3) as resp:
         resume_json = json.loads(resp.read().decode("utf-8"))
         assert resume_json["status"] == "ok"
-    print("  [✓] Streaming server /health and empty-body /api/resume verified.")
+    print("  [✓] Token auth, DNS-rebinding Host allowlist, /health, and /api/resume verified.")
 
-    _verify_websocket_stream(preview_url)
+    _verify_websocket_security_and_stream(preview_url)
 
     # 3. Second cobrowse_open still preserves preview_url
     open_res2 = json.loads(handle_open({"url": "about:blank"}))
@@ -156,29 +222,61 @@ def test_tool_invocations_and_server():
     assert state_res.get("interactive_elements_count") >= 1
     print("  [✓] cobrowse_get_state verified.")
 
-    # 6. cobrowse_click + graceful error on invalid selector
+    # 6. cobrowse_click + SSRF / invalid navigate rejection
     click_res = json.loads(handle_click({"selector": "#btn-ok"}))
     assert click_res.get("status") == "clicked"
 
     err_res = json.loads(handle_navigate({}))
     assert err_res.get("status") == "error"
-    print("  [✓] cobrowse_click and structured JSON error handling verified.")
+    for blocked in ("file:///etc/passwd", "http://169.254.169.254/latest/meta-data/", "javascript:alert(1)"):
+        ssrf_res = json.loads(handle_navigate({"url": blocked}))
+        assert ssrf_res.get("status") == "error", f"SSRF not blocked for {blocked}: {ssrf_res}"
+    print("  [✓] cobrowse_click, structured JSON errors, and SSRF navigate refusal verified.")
 
     # 7. cobrowse_scroll
     scroll_res = json.loads(handle_scroll({"direction": "down", "amount": 200}))
     assert scroll_res.get("status") == "scrolled"
 
-    # 7b. cobrowse_request_handoff aborts cleanly in unattended mode (no viewer)
-    os.environ["HERMES_UNATTENDED"] = "1"
+    # 7b. cobrowse_request_handoff aborts immediately during gateway OR cron turns EVEN IF a viewer is connected
+    ws_conn = websocket.create_connection(
+        f"{base_http.replace('http://', 'ws://')}/ws/studio?token={token}",
+        origin=base_http,
+        timeout=5,
+    )
     try:
-        unattended_res = json.loads(handle_request_handoff({
-            "reason": "Simulated unattended 2FA gate",
-            "timeout_seconds": 30,
-        }))
-        assert unattended_res.get("status") == "unattended_abort", unattended_res
+        ws_conn.recv()  # studio_init
+
+        # Gateway platform context
+        os.environ["HERMES_SESSION_PLATFORM"] = "telegram"
+        try:
+            gw_res = json.loads(handle_request_handoff({
+                "reason": "Gateway 2FA gate",
+                "timeout_seconds": 30,
+            }))
+            assert gw_res.get("status") == "unattended_abort", gw_res
+            assert "gateway" in (gw_res.get("source") or "")
+        finally:
+            os.environ.pop("HERMES_SESSION_PLATFORM", None)
+
+        # Cron execution identity (if cron.execution_identity is installed in runtime)
+        try:
+            import cron.execution_identity as cei  # type: ignore
+
+            tok = cei._CURRENT.set(object())
+            try:
+                cron_res = json.loads(handle_request_handoff({
+                    "reason": "Cron 2FA gate",
+                    "timeout_seconds": 30,
+                }))
+                assert cron_res.get("status") == "unattended_abort", cron_res
+                assert cron_res.get("source") == "cron"
+            finally:
+                cei._CURRENT.reset(tok)
+        except ImportError:
+            pass
     finally:
-        os.environ.pop("HERMES_UNATTENDED", None)
-    print("  [✓] Unattended 2FA handoff guard verified.")
+        ws_conn.close()
+    print("  [✓] Gateway & cron unattended 2FA abort verified even with active WS viewer.")
 
     # 8. cobrowse_close and clean re-open
     close_res = json.loads(handle_close({}))

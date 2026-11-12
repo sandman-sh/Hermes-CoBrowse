@@ -5,7 +5,7 @@ repo: https://github.com/sandman-sh/Hermes-CoBrowse
 sha: "<PINNED_40_CHAR_COMMIT_SHA>"
 subdir: ""
 title: "Hermes CoBrowse"
-description: "Real-time multi-window spatial co-browsing canvas and interactive human-in-the-loop web automation for Hermes Agent and Desktop with CDP screencasting, 8-way window resizing, Inspector Studio telemetry, and 2FA handoff. Disclosure — launches headless Chromium processes via Playwright and runs a local loopback HTTP/WebSocket server on 127.0.0.1:9876+; navigates to agent-supplied URLs and executes agent-supplied JS via cobrowse_eval_js; reads no local credentials or .env files and sends no external analytics."
+description: "Real-time multi-window spatial co-browsing canvas and interactive human-in-the-loop web automation for Hermes Agent via a localhost web studio with CDP screencasting, 8-way window resizing, Inspector telemetry, and 2FA handoff. Disclosure — launches headless Chromium with a minimal sanitized env and runs a token-authenticated localhost server on 127.0.0.1:9876+ with Host/Origin checks; blocks local files and private/link-local IPs by default across redirects, redacts password/OTP values in DOM state, executes agent-supplied JS via cobrowse_eval_js, reads no local credentials, and sends no external telemetry."
 maintainer: sandman-sh
 tier: community
 category: desktop

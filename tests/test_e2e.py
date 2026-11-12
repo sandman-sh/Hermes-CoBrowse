@@ -3,7 +3,7 @@
 Tests the complete live flow without any mocking:
 1. Real Demo Portal (uvicorn HTTP server) with login, 2FA OTP gate, and dashboard
 2. Real CoBrowseManager (headless Chromium + CDP screencast + FastAPI/WS server)
-3. Real WebSocket client acting as the Hermes Desktop canvas UI:
+3. Real WebSocket client acting as the Spatial Canvas Studio UI:
    - Receives init & JPEG frames
    - Observes agent_action & page_updated telemetry
    - Receives intervention_required when 2FA gate is reached
@@ -18,6 +18,7 @@ import socket
 import sys
 import threading
 import time
+from urllib.parse import parse_qs, urlsplit
 import uvicorn
 import websocket
 
@@ -60,6 +61,7 @@ def run_e2e():
     print(f"  [✓] Real Demo Portal running at http://127.0.0.1:{portal_port}")
 
     mgr = CoBrowseManager.get_instance()
+    mgr.set_allow_private_networks(True)
     ws = None
 
     try:
@@ -67,11 +69,15 @@ def run_e2e():
         login_url = f"http://127.0.0.1:{portal_port}/login"
         start_res = mgr.ensure_started(initial_url=login_url)
         preview_url = start_res["preview_url"]
-        print(f"  [✓] CoBrowse started at {preview_url}")
+        parts = urlsplit(preview_url)
+        base_http = f"{parts.scheme}://{parts.netloc}"
+        token = parse_qs(parts.query).get("token", [""])[0]
+        assert token, f"Missing token in preview_url: {preview_url}"
+        print(f"  [✓] CoBrowse started at {base_http}/?token=***")
 
-        # 3. Connect real WebSocket client (simulating Hermes Desktop UI canvas)
-        ws_url = preview_url.replace("http://", "ws://") + "/ws/stream"
-        ws = websocket.create_connection(ws_url, timeout=10)
+        # 3. Connect real WebSocket client (simulating Spatial Canvas Studio UI)
+        ws_url = f"{base_http.replace('http://', 'ws://')}/ws/stream?token={token}"
+        ws = websocket.create_connection(ws_url, origin=base_http, timeout=10)
 
         received_events = []
         frames_seen = 0
@@ -205,6 +211,7 @@ def run_e2e():
         if "reader_thread" in locals():
             reader_thread.join(timeout=2.0)
         handle_close({})
+        mgr.set_allow_private_networks(False)
         portal_server.should_exit = True
         print("  [✓] Clean shutdown of CoBrowse & Demo Portal")
 

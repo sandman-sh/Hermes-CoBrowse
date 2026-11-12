@@ -67,17 +67,18 @@ def main():
     if not wait_for_port(portal_port, timeout=5.0):
         raise RuntimeError(f"Demo portal failed to listen on port {portal_port}")
 
-    # 2. Boot CoBrowse Engine
+    # 2. Boot CoBrowse Engine (opt in to loopback target strictly for local demo portal)
     print("[2/5] Initializing CoBrowse CDP Engine & Live Streaming Server...")
     mgr = CoBrowseManager.get_instance()
+    mgr.set_allow_private_networks(True)
     portal_url = f"http://127.0.0.1:{portal_port}/login"
     mgr.ensure_started(initial_url=portal_url)
 
     preview_url = mgr.preview_url
     print(f"[+] CoBrowse Live Canvas active at: {preview_url}")
 
-    # 3. Open Canvas in Browser (simulating Hermes Desktop preview pane)
-    print("[3/5] Opening Hermes Desktop preview pane in default browser...")
+    # 3. Open Canvas in Browser (separate localhost studio web view)
+    print("[3/5] Opening Spatial Canvas Studio preview in default browser...")
     webbrowser.open(preview_url)
     time.sleep(2.5)
 

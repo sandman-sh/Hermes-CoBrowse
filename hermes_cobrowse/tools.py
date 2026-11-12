@@ -10,8 +10,9 @@ cobrowse_eval_js, and cobrowse_close.
 import asyncio
 import json
 import logging
+import os
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import uvicorn
 
 from hermes_cobrowse.engine import BrowserEngine
@@ -36,10 +37,17 @@ class CoBrowseManager:
         self.uv_server: Optional[uvicorn.Server] = None
         self._uv_task: Optional[asyncio.Task] = None
         self.port: int = 9876
+        self.allow_private_networks: bool = False
         self._ready_event = threading.Event()
         self._lock = threading.Lock()
         self._async_lock: Optional[asyncio.Lock] = None
         self.preview_url: str = ""
+
+    def set_allow_private_networks(self, enabled: bool) -> None:
+        """Configure whether private/loopback/link-local navigation targets are permitted."""
+        self.allow_private_networks = bool(enabled)
+        for eng in self.sessions.values():
+            eng.allow_private_networks = self.allow_private_networks
 
     @classmethod
     def get_instance(cls) -> "CoBrowseManager":
@@ -157,7 +165,13 @@ class CoBrowseManager:
                     "total_sessions": len(self.sessions),
                 }
 
-            eng = BrowserEngine(width=width, height=height, session_id=sid, title=title)
+            eng = BrowserEngine(
+                width=width,
+                height=height,
+                session_id=sid,
+                title=title,
+                allow_private_networks=self.allow_private_networks,
+            )
             self.sessions[sid] = eng
             self.active_session_id = sid
             if self.server:
@@ -422,12 +436,28 @@ def handle_type(params: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         return json.dumps({"status": "error", "error": str(e)})
 
 
-def _is_unattended_env() -> bool:
-    import os
-    return any(
-        str(os.environ.get(k, "")).strip().lower() in ("1", "true", "yes")
-        for k in ("HERMES_UNATTENDED", "HERMES_CRON", "HERMES_NONINTERACTIVE")
-    )
+def _detect_unattended_context() -> Tuple[bool, Optional[str]]:
+    """Detect whether execution is occurring inside a Hermes cron job or gateway turn."""
+    try:
+        from cron.execution_identity import current_cron_execution  # type: ignore
+
+        if current_cron_execution() is not None:
+            return True, "cron"
+    except Exception:
+        pass
+
+    try:
+        from gateway.session_context import get_session_env  # type: ignore
+
+        platform = str(get_session_env("HERMES_SESSION_PLATFORM", "") or "").strip()
+        if platform:
+            return True, f"gateway:{platform}"
+    except Exception:
+        platform = str(os.getenv("HERMES_SESSION_PLATFORM", "") or "").strip()
+        if platform:
+            return True, f"gateway:{platform}"
+
+    return False, None
 
 
 def handle_request_handoff(params: Optional[Dict[str, Any]] = None, **kwargs) -> str:
@@ -438,20 +468,18 @@ def handle_request_handoff(params: Optional[Dict[str, Any]] = None, **kwargs) ->
         raw_timeout = int(args.get("timeout_seconds", 300))
         timeout_sec = max(1, min(raw_timeout, 900))
 
-        mgr = CoBrowseManager.get_instance()
-        eng = _get_target_engine(mgr, args.get("session_id"))
-
-        # Respect unattended/cron runs: avoid waiting up to timeout when no interactive viewer is connected.
-        has_viewer = bool(
-            mgr.server
-            and (mgr.server.studio_websockets or mgr.server.stream_websockets)
-        )
-        if _is_unattended_env() and not has_viewer:
+        # Abort immediately during cron or gateway turns even if a local viewer happens to be open.
+        unattended, source = _detect_unattended_context()
+        if unattended:
             return json.dumps({
                 "status": "unattended_abort",
-                "message": "Human handoff skipped cleanly in unattended mode without an active Spatial Canvas viewer.",
+                "source": source,
+                "message": "Human handoff aborted immediately because execution is running in an unattended cron or gateway turn.",
                 "reason": reason,
             })
+
+        mgr = CoBrowseManager.get_instance()
+        eng = _get_target_engine(mgr, args.get("session_id"))
 
         res = mgr.run_async(
             eng.request_human_intervention(

@@ -3,7 +3,7 @@
 SCHEMAS = {
     "cobrowse_open": {
         "name": "cobrowse_open",
-        "description": "Launch the CoBrowse co-browsing session, start the real-time visual streaming server for Hermes Desktop, and navigate to an initial URL. Returns session ID and live preview URL.",
+        "description": "Launch the CoBrowse co-browsing session, start the real-time visual streaming server for the localhost Spatial Canvas Studio, and navigate to an initial URL. Returns session ID and tokenized live preview URL.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -131,7 +131,7 @@ SCHEMAS = {
     },
     "cobrowse_request_handoff": {
         "name": "cobrowse_request_handoff",
-        "description": "PAUSE autonomous agent execution and request human intervention for sensitive operations (e.g., 2FA SMS code, CAPTCHA, bank authentication, payment checkout). Shows an alert in the Hermes Desktop stream and awaits user action and confirmation.",
+        "description": "PAUSE autonomous agent execution and request human intervention for sensitive operations (e.g., 2FA SMS code, CAPTCHA, bank authentication, payment checkout). Shows an alert in the Spatial Canvas Studio stream and awaits user action and confirmation.",
         "parameters": {
             "type": "object",
             "properties": {

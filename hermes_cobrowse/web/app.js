@@ -15,6 +15,18 @@
     { label: "390×844", width: 390, height: 844 },
   ];
 
+  const authToken = new URLSearchParams(window.location.search).get("token") || "";
+
+  function withAuthQuery(path) {
+    if (!authToken) return path;
+    const sep = path.includes("?") ? "&" : "?";
+    return `${path}${sep}token=${encodeURIComponent(authToken)}`;
+  }
+
+  function authHeaders(extra = {}) {
+    return authToken ? { ...extra, "X-CoBrowse-Token": authToken } : { ...extra };
+  }
+
   // ---------------- DOM References ----------------
   const spatialStage = document.getElementById("spatialStage");
   const canvasSurface = document.getElementById("canvasSurface");
@@ -764,7 +776,7 @@
 
     // Screenshot download
     sess.shotBtnEl.addEventListener("click", () => {
-      window.open(`/api/sessions/${encodeURIComponent(sid)}/screenshot`, "_blank");
+      window.open(withAuthQuery(`/api/sessions/${encodeURIComponent(sid)}/screenshot`), "_blank");
       appendLog(`Captured PNG snapshot`, "success", sid);
     });
 
@@ -1007,10 +1019,14 @@
     try {
       const resp = await fetch(`/api/sessions/${encodeURIComponent(sid)}/${action}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: body ? JSON.stringify(body) : undefined,
       });
-      return await resp.json();
+      const data = await resp.json();
+      if (!resp.ok && data?.error) {
+        appendLog(`${action} blocked: ${data.error}`, "warn", sid);
+      }
+      return data;
     } catch (e) {
       appendLog(`${action} failed: ${e.message}`, "warn", sid);
       return null;
@@ -1037,10 +1053,14 @@
       appendLog(`Launching Chromium window (${width}×${height})...`, "info");
       const resp = await fetch("/api/sessions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ url: url || "about:blank", title: title || "", width, height }),
       });
       const data = await resp.json();
+      if (!resp.ok && data?.error) {
+        appendLog(`Window launch blocked: ${data.error}`, "warn");
+        return data;
+      }
       if (data.session) {
         const sess = createOrUpdateBrowserWindow(data.session);
         focusSession(sess.id, true);
@@ -1057,7 +1077,10 @@
     const sess = sessions.get(sid);
     if (sess) sess.el.classList.add("closing");
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(sid)}`, { method: "DELETE" });
+      await fetch(`/api/sessions/${encodeURIComponent(sid)}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
     } catch (e) {
       appendLog(`Close error: ${e.message}`, "warn", sid);
     }
@@ -1114,7 +1137,9 @@
   async function fetchSessionDomState(sid) {
     if (!sid) return;
     try {
-      const resp = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
+      const resp = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`, {
+        headers: authHeaders(),
+      });
       if (!resp.ok) return;
       const data = await resp.json();
       const sess = sessions.get(sid);
@@ -1128,7 +1153,9 @@
   async function fetchSessionTelemetry(sid) {
     if (!sid) return;
     try {
-      const resp = await fetch(`/api/sessions/${encodeURIComponent(sid)}/telemetry`);
+      const resp = await fetch(`/api/sessions/${encodeURIComponent(sid)}/telemetry`, {
+        headers: authHeaders(),
+      });
       if (!resp.ok) return;
       const data = await resp.json();
       const sess = sessions.get(sid);
@@ -1463,7 +1490,7 @@
       items.push({
         label: `Download PNG Snapshot (${sid})`,
         hint: "Export",
-        run: () => window.open(`/api/sessions/${encodeURIComponent(sid)}/screenshot`, "_blank"),
+        run: () => window.open(withAuthQuery(`/api/sessions/${encodeURIComponent(sid)}/screenshot`), "_blank"),
       });
     }
     sessions.forEach((sess, sid) => {
@@ -1552,7 +1579,7 @@
   function connectStudioSocket() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${proto}//${window.location.host}/ws/studio`;
+    const wsUrl = withAuthQuery(`${proto}//${window.location.host}/ws/studio`);
 
     ws = new WebSocket(wsUrl);
 

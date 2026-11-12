@@ -16,7 +16,7 @@ HTML_LOGIN = """
 <head>
   <title>Apex Cloud — Authenticate</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    body { font-family: system-ui, "Segoe UI", sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
     .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; width: 360px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
     h2 { margin-top: 0; color: #38bdf8; font-size: 20px; }
     p { font-size: 13px; color: #94a3b8; margin-bottom: 20px; }
@@ -51,7 +51,7 @@ HTML_2FA = """
 <head>
   <title>Apex Cloud — Two-Factor Verification</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    body { font-family: system-ui, "Segoe UI", sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
     .card { background: #1e293b; border: 1px solid #f59e0b; border-radius: 12px; padding: 32px; width: 380px; box-shadow: 0 10px 30px rgba(245,158,11,0.2); }
     h2 { margin-top: 0; color: #fbbf24; font-size: 20px; display: flex; align-items: center; gap: 8px; }
     p { font-size: 13px; color: #94a3b8; line-height: 1.5; margin-bottom: 20px; }
@@ -73,7 +73,7 @@ HTML_2FA = """
     </div>
     <form action="/verify-2fa" method="post">
       <label>6-Digit Verification Code</label>
-      <input type="text" id="otpCode" name="code" maxlength="6" placeholder="000000" autofocus required />
+      <input type="text" id="otpCode" name="code" maxlength="6" autocomplete="one-time-code" placeholder="000000" autofocus required />
       <button type="submit" id="btnVerify">Verify & Confirm Identity</button>
     </form>
     <div class="otp-hint">Protected by Apex Hardware Token Security</div>
@@ -88,7 +88,7 @@ HTML_DASHBOARD = """
 <head>
   <title>Apex Cloud — Production Console</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0b0f19; color: #f8fafc; margin: 0; padding: 32px; }
+    body { font-family: system-ui, "Segoe UI", sans-serif; background: #0b0f19; color: #f8fafc; margin: 0; padding: 32px; }
     .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 16px; margin-bottom: 32px; }
     .title { font-size: 22px; font-weight: 700; color: #38bdf8; }
     .user { font-size: 13px; color: #10b981; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); padding: 4px 10px; border-radius: 20px; }

@@ -59,6 +59,14 @@ def register(ctx):
     """Hermes Plugin registration callback."""
     logger.info("Registering Hermes CoBrowse plugin...")
 
+    allow_private = False
+    if hasattr(ctx, "get_config"):
+        try:
+            allow_private = bool(ctx.get_config("allow_private_networks", False))
+        except Exception:
+            allow_private = False
+    CoBrowseManager.get_instance().set_allow_private_networks(allow_private)
+
     # 1. Register Tools
     for tool_name, handler_fn in TOOL_MAP.items():
         schema = SCHEMAS.get(tool_name)

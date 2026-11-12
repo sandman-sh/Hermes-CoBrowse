@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import urllib.request
+from urllib.parse import parse_qs, urlsplit
 import uvicorn
 import websocket
 
@@ -38,12 +39,24 @@ def _wait_port(port: int, timeout: float = 5.0) -> bool:
     return False
 
 
-def _http_json(url: str, method: str = "GET", body: dict = None) -> dict:
+def _http_json(url: str, method: str = "GET", body: dict = None, token: str = "") -> dict:
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    headers = {"Content-Type": "application/json"} if data is not None else {}
+    headers = {}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["X-CoBrowse-Token"] = token
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _split_preview(preview_url: str):
+    parts = urlsplit(preview_url)
+    base_http = f"{parts.scheme}://{parts.netloc}"
+    token = parse_qs(parts.query).get("token", [""])[0]
+    assert token, f"Missing token in preview_url: {preview_url}"
+    return base_http, token
 
 
 def run_studio_tests():
@@ -59,11 +72,14 @@ def run_studio_tests():
     print(f"  [✓] Real Demo Portal running at {base_portal}")
 
     ws = None
+    mgr = CoBrowseManager.get_instance()
+    mgr.set_allow_private_networks(True)
     try:
         # 1. Launch two concurrent independent sessions via Hermes tools
         r1 = json.loads(handle_open({"url": f"{base_portal}/", "session_id": "win-alpha", "title": "Alpha Portal"}))
         assert r1["session_id"] == "win-alpha"
         preview_url = r1["preview_url"]
+        base_http, token = _split_preview(preview_url)
 
         r2 = json.loads(handle_open({
             "url": f"{base_portal}/login",
@@ -78,21 +94,22 @@ def run_studio_tests():
 
         # 2. Launch a third window via REST POST /api/sessions (what Canvas UI "+ New Window" calls)
         created = _http_json(
-            f"{preview_url}/api/sessions",
+            f"{base_http}/api/sessions",
             method="POST",
             body={"url": f"{base_portal}/dashboard", "title": "Gamma Dashboard", "width": 390, "height": 844},
+            token=token,
         )
         sid_gamma = created["session_id"]
         assert sid_gamma and sid_gamma not in ("win-alpha", "win-beta")
 
-        listed = _http_json(f"{preview_url}/api/sessions")
+        listed = _http_json(f"{base_http}/api/sessions", token=token)
         ids = [s["session_id"] for s in listed["sessions"]]
         assert set(ids) == {"win-alpha", "win-beta", sid_gamma}, f"Unexpected session list: {ids}"
         print(f"  [✓] REST POST /api/sessions spawned third live window ({sid_gamma}); total=3.")
 
         # 3. Verify multiplexed /ws/studio WebSocket with active reader thread
-        ws_url = preview_url.replace("http://", "ws://") + "/ws/studio"
-        ws = websocket.create_connection(ws_url, timeout=10)
+        ws_url = f"{base_http.replace('http://', 'ws://')}/ws/studio?token={token}"
+        ws = websocket.create_connection(ws_url, origin=base_http, timeout=10)
         studio_init = json.loads(ws.recv())
         assert studio_init["type"] == "studio_init"
         assert len(studio_init["sessions"]) == 3
@@ -128,22 +145,23 @@ def run_studio_tests():
         print(f"  [✓] /ws/studio streamed live frames for sessions: {sorted(frames_by_sid)}")
 
         # 4. Verify Back / Forward / Reload navigation on win-alpha
-        _http_json(f"{preview_url}/api/sessions/win-alpha/navigate", method="POST", body={"url": f"{base_portal}/2fa"})
-        back_res = _http_json(f"{preview_url}/api/sessions/win-alpha/back", method="POST")
+        _http_json(f"{base_http}/api/sessions/win-alpha/navigate", method="POST", body={"url": f"{base_portal}/2fa"}, token=token)
+        back_res = _http_json(f"{base_http}/api/sessions/win-alpha/back", method="POST", token=token)
         assert back_res["status"] == "navigated_back"
         assert back_res["url"].rstrip("/") == base_portal
-        fwd_res = _http_json(f"{preview_url}/api/sessions/win-alpha/forward", method="POST")
+        fwd_res = _http_json(f"{base_http}/api/sessions/win-alpha/forward", method="POST", token=token)
         assert fwd_res["status"] == "navigated_forward"
         assert "/2fa" in fwd_res["url"]
-        rel_res = _http_json(f"{preview_url}/api/sessions/win-alpha/reload", method="POST")
+        rel_res = _http_json(f"{base_http}/api/sessions/win-alpha/reload", method="POST", token=token)
         assert rel_res["status"] == "reloaded"
         print("  [✓] Real Playwright Back / Forward / Reload history verified.")
 
         # 5. Verify Dynamic Viewport Resize on win-beta
         resize_res = _http_json(
-            f"{preview_url}/api/sessions/win-beta/resize",
+            f"{base_http}/api/sessions/win-beta/resize",
             method="POST",
             body={"width": 412, "height": 732},
+            token=token,
         )
         assert resize_res["viewport"] == {"width": 412, "height": 732}
         dims = json.loads(handle_eval_js({
@@ -156,25 +174,29 @@ def run_studio_tests():
         # 6. Verify Real Console & Network Telemetry Capture (zero fake telemetry!)
         handle_eval_js({"session_id": "win-alpha", "script": "console.warn('real-warning-probe');"})
         time.sleep(0.15)
-        telem = _http_json(f"{preview_url}/api/sessions/win-alpha/telemetry")
+        telem = _http_json(f"{base_http}/api/sessions/win-alpha/telemetry", token=token)
         assert any("real-warning-probe" in c.get("text", "") for c in telem["console_logs"]), "Missing console capture"
         assert any("/2fa" in n.get("url", "") and n.get("status") == 200 for n in telem["network_logs"]), "Missing HTTP 200 capture"
         print(f"  [✓] Real Console ({len(telem['console_logs'])}) & HTTP Network ({len(telem['network_logs'])}) telemetry verified.")
 
         # 7. Verify Real DOM Element Highlight & PNG Screenshot
-        hl = _http_json(f"{preview_url}/api/sessions/win-alpha/highlight", method="POST", body={"selector": "#otpCode"})
+        hl = _http_json(f"{base_http}/api/sessions/win-alpha/highlight", method="POST", body={"selector": "#otpCode"}, token=token)
         assert hl["status"] == "highlighted" and hl["box"]["width"] > 0
 
-        with urllib.request.urlopen(f"{preview_url}/api/sessions/win-alpha/screenshot", timeout=5) as resp:
+        shot_req = urllib.request.Request(
+            f"{base_http}/api/sessions/win-alpha/screenshot",
+            headers={"X-CoBrowse-Token": token},
+        )
+        with urllib.request.urlopen(shot_req, timeout=5) as resp:
             png_bytes = resp.read()
             assert png_bytes.startswith(b"\x89PNG\r\n\x1a\n"), "Invalid PNG header"
         print(f"  [✓] Live DOM element highlight & PNG screenshot export ({len(png_bytes)} bytes) verified.")
 
         # 8. Verify single-window DELETE /api/sessions/{sid} leaves siblings alive
-        del_res = _http_json(f"{preview_url}/api/sessions/{sid_gamma}", method="DELETE")
+        del_res = _http_json(f"{base_http}/api/sessions/{sid_gamma}", method="DELETE", token=token)
         assert del_res["status"] == "closed"
         time.sleep(0.15)
-        after_list = _http_json(f"{preview_url}/api/sessions")
+        after_list = _http_json(f"{base_http}/api/sessions", token=token)
         after_ids = [s["session_id"] for s in after_list["sessions"]]
         assert set(after_ids) == {"win-alpha", "win-beta"}, f"Sibling windows should remain alive: {after_ids}"
         assert any(e.get("type") == "console_log" for e in events_seen), "Missing console_log WS broadcast"
@@ -194,6 +216,7 @@ def run_studio_tests():
         if "reader_thread" in locals():
             reader_thread.join(timeout=2.0)
         handle_close({})
+        mgr.set_allow_private_networks(False)
         portal_server.should_exit = True
         print("  [✓] Clean full Studio & Portal shutdown.")
 

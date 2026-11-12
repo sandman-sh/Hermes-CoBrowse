@@ -1,12 +1,17 @@
 name: hermes-cobrowse
 version: "1.0.0"
-description: "Real-time multi-window spatial co-browsing canvas and interactive human-in-the-loop web automation for Hermes Agent and Desktop."
+description: "Real-time multi-window spatial co-browsing canvas and interactive human-in-the-loop web automation for Hermes Agent via a localhost web studio."
 maintainer: sandman-sh
 tier: community
 category: desktop
 requires_hermes: ">=0.22.0"
 title: "Hermes CoBrowse"
 platforms: []
+config_schema:
+  allow_private_networks:
+    type: boolean
+    default: false
+    description: "Allow navigating to localhost, loopback, or private-network URLs (disabled by default for SSRF protection)."
 provides_tools:
   - cobrowse_open
   - cobrowse_navigate

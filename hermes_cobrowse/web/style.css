@@ -45,7 +45,7 @@
   --radius-pill: 999px;
   --spring: cubic-bezier(0.22, 1, 0.36, 1);
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
 }
 

@@ -12,6 +12,12 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, List, Optional
 
+from hermes_cobrowse.security import (
+    build_minimal_browser_env,
+    is_route_request_allowed,
+    validate_target_url_async,
+)
+
 if TYPE_CHECKING:
     from playwright.async_api import (
         Browser,
@@ -46,11 +52,13 @@ class BrowserEngine:
         height: int = 800,
         session_id: str = "default",
         title: str = "",
+        allow_private_networks: bool = False,
     ):
         self.width = width
         self.height = height
         self.session_id = session_id or "default"
         self.window_title = title or ""
+        self.allow_private_networks = bool(allow_private_networks)
         self.created_at = time.time()
 
         self.playwright: Optional[Any] = None
@@ -306,6 +314,21 @@ class BrowserEngine:
         except Exception:
             pass
 
+    async def _on_route(self, route: Any):
+        """Enforce SSRF/scheme guard on every navigation, redirect hop, and request."""
+        req = route.request
+        allowed = await is_route_request_allowed(
+            req.url,
+            req.resource_type,
+            req.is_navigation_request(),
+            allow_private_networks=self.allow_private_networks,
+        )
+        if allowed:
+            await route.continue_()
+        else:
+            logger.warning(f"[{self.session_id}] Blocked request by SSRF guard: {req.url}")
+            await route.abort("blockedbyclient")
+
     async def start(self, initial_url: str = "about:blank") -> Dict[str, Any]:
         """Launch Chromium, configure CDP screencast, and navigate to initial_url."""
         if self.is_running and self.page:
@@ -318,6 +341,13 @@ class BrowserEngine:
                 "viewport": {"width": self.width, "height": self.height},
             }
 
+        if initial_url and initial_url != "about:blank":
+            initial_url = await validate_target_url_async(
+                initial_url,
+                allow_private_networks=self.allow_private_networks,
+                allow_about_blank=True,
+            )
+
         self._loop = asyncio.get_running_loop()
         logger.info(f"[{self.session_id}] Launching Playwright Chromium ({self.width}x{self.height})...")
 
@@ -327,6 +357,7 @@ class BrowserEngine:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(
                 headless=True,
+                env=build_minimal_browser_env(),
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
@@ -335,11 +366,8 @@ class BrowserEngine:
 
             self.context = await self.browser.new_context(
                 viewport={"width": self.width, "height": self.height},
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                ),
             )
+            await self.context.route("**/*", self._on_route)
 
             self.page = await self.context.new_page()
             self.page.on("framenavigated", self._on_frame_navigated)
@@ -386,13 +414,11 @@ class BrowserEngine:
         if not self.page:
             raise RuntimeError("Browser is not running. Call start() first.")
 
-        if (
-            not url.startswith("http://")
-            and not url.startswith("https://")
-            and not url.startswith("file://")
-            and url != "about:blank"
-        ):
-            url = f"https://{url}"
+        url = await validate_target_url_async(
+            url,
+            allow_private_networks=self.allow_private_networks,
+            allow_about_blank=True,
+        )
 
         await self.broadcast_event({
             "type": "agent_action",
@@ -405,6 +431,8 @@ class BrowserEngine:
             response = await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
             status_code = response.status if response else 200
         except Exception as e:
+            if "ERR_BLOCKED_BY_CLIENT" in str(e):
+                raise ValueError(f"Navigation blocked by SSRF guard: {e}") from e
             logger.warning(f"Navigation warning: {e}")
             status_code = -1
 
@@ -786,8 +814,18 @@ class BrowserEngine:
                         rect.right > 0 &&
                         rect.left < window.innerWidth
                     ) {
-                        let text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim();
-                        if (text.length > 50) text = text.substring(0, 50) + '...';
+                        const elType = (el.getAttribute('type') || el.type || '').toLowerCase().trim();
+                        const acTokens = (el.getAttribute('autocomplete') || '').toLowerCase().trim().split(/\\s+/).filter(Boolean);
+                        const isSensitive = (
+                            elType === 'password'
+                            || acTokens.includes('one-time-code')
+                            || acTokens.includes('current-password')
+                            || acTokens.includes('new-password')
+                        );
+                        let text = isSensitive
+                            ? '[redacted]'
+                            : (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim();
+                        if (!isSensitive && text.length > 50) text = text.substring(0, 50) + '...';
 
                         let selector = '';
                         const tag = el.tagName.toLowerCase();
@@ -902,7 +940,7 @@ class BrowserEngine:
         self.intervention_deadline = time.monotonic() + float(timeout_seconds)
         self.intervention_event = asyncio.Event()
 
-        # Broadcast critical alert to Hermes Desktop and Web UI
+        # Broadcast critical alert to the Canvas Studio UI
         await self.broadcast_event({
             "type": "intervention_required",
             "reason": reason,

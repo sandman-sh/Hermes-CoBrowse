@@ -10,6 +10,11 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from hermes_cobrowse.engine import BrowserEngine
+from hermes_cobrowse.security import (
+    build_minimal_browser_env,
+    is_route_request_allowed,
+    validate_target_url_async,
+)
 
 
 async def run_tests():
@@ -35,7 +40,7 @@ async def run_tests():
         assert engine.is_running is True
         print("  [✓] Browser started and CDP session attached.")
 
-        # 2. Set test content including React-style colon ID and leading-whitespace class
+        # 2. Set test content including React-style colon ID, leading-whitespace class, and sensitive password/OTP fields
         await engine.page.set_content("""
             <!DOCTYPE html>
             <html>
@@ -43,6 +48,10 @@ async def run_tests():
             <body>
                 <h1 id="header">Initial Text</h1>
                 <input id="test-input" type="text" placeholder="Type here" />
+                <input id="pw-input" type="password" value="super-secret-pw" />
+                <input id="otp-input" type="text" autocomplete="one-time-code" value="849201" />
+                <input id="cur-pw-input" type="text" autocomplete="current-password" value="old-secret" />
+                <input id="new-pw-input" type="text" autocomplete="new-password" value="new-secret" />
                 <button id="test-btn" onclick="document.getElementById('header').innerText = 'Clicked Successfully!'">Click Me</button>
                 <button id="react:r0:" class="  special-btn  primary" onclick="document.getElementById('header').innerText = 'Escaped Selector Worked!'">Escaped</button>
             </body>
@@ -54,14 +63,23 @@ async def run_tests():
         assert len(frames_received) > 0, "Expected at least 1 CDP frame"
         print(f"  [✓] Screencast/snapshot frames received via CDP: {len(frames_received)}")
 
-        # 3. Test State Extraction & CSS.escape selector generation
+        # 3. Test State Extraction, Password/OTP Redaction, & CSS.escape selector generation
         state = await engine.get_state(include_dom_tree=True)
         assert state["title"] == "Test Page"
-        assert state["interactive_elements_count"] >= 3
+        assert state["interactive_elements_count"] >= 7
+        by_id = {el.get("id"): el for el in state["elements"]}
+        for secret_id, secret_val in (
+            ("pw-input", "super-secret-pw"),
+            ("otp-input", "849201"),
+            ("cur-pw-input", "old-secret"),
+            ("new-pw-input", "new-secret"),
+        ):
+            assert by_id[secret_id]["text"] == "[redacted]", f"Leak on {secret_id}: {by_id[secret_id]}"
+            assert secret_val not in str(state), f"Secret leaked into state: {secret_val}"
         selectors = [el["selector"] for el in state["elements"]]
         escaped_sel = next((s for s in selectors if "react" in s), None)
         assert escaped_sel is not None, f"Escaped selector missing: {selectors}"
-        print(f"  [✓] State extracted: {state['interactive_elements_count']} elements (escaped selector: {escaped_sel}).")
+        print(f"  [✓] State extracted, password/OTP inputs redacted, escaped selector verified ({escaped_sel}).")
 
         # 4. Test Typing with default selector clear, explicit clear_first=False, and clear_first=True
         await engine.type_text("Old Value", selector="#test-input")
@@ -111,6 +129,53 @@ async def run_tests():
         assert any(e.get("type") == "intervention_resolved" for e in events_received)
         print("  [✓] Thread-safe human intervention handoff & resolution verified.")
     finally:
+        # 7b. Test SSRF scheme/private-IP blocking & minimal Chromium env
+        blocked_targets = [
+            "file:///etc/passwd",
+            "chrome://settings",
+            "view-source:https://example.com",
+            "data:text/html,<h1>x</h1>",
+            "javascript:alert(1)",
+            "http://127.0.0.1:9877/login",
+            "http://localhost:8000/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.1/",
+            "http://100.64.0.1/",
+            "http://[::1]/",
+            "http://[fc00::1]/",
+            "http://[fe80::1]/",
+            "http://[::ffff:127.0.0.1]/",
+        ]
+        for target in blocked_targets:
+            blocked = False
+            try:
+                await engine.navigate(target)
+            except ValueError:
+                blocked = True
+            assert blocked, f"SSRF guard failed to block {target}"
+            assert not await is_route_request_allowed(
+                target, "document", True, allow_private_networks=False
+            ), f"Route guard failed to abort redirect/sub-navigation to {target}"
+
+        # Verify real Chromium sub-navigation / fetch is aborted live by context.route SSRF guard
+        await engine.page.evaluate("""async () => {
+            window.__ssrfBlocked = false;
+            try {
+                await fetch('http://169.254.169.254/latest/meta-data/');
+            } catch (e) {
+                window.__ssrfBlocked = true;
+            }
+        }""")
+        assert await engine.page.evaluate("window.__ssrfBlocked") is True, "Chromium fetch to metadata IP was not aborted!"
+
+        os.environ["HERMES_TEST_PROVIDER_KEY"] = "sk-do-not-leak"
+        try:
+            clean_env = build_minimal_browser_env()
+            assert "HERMES_TEST_PROVIDER_KEY" not in clean_env
+        finally:
+            os.environ.pop("HERMES_TEST_PROVIDER_KEY", None)
+        print("  [✓] SSRF URL/route guards and minimal sanitized browser env verified.")
+
         # 8. Test Shutdown
         await engine.close()
         assert engine.is_running is False

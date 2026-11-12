@@ -15,7 +15,7 @@
 
 Autonomous browser agents are fast until they hit workflows requiring human authentication, MFA/2FA verification, checkout approvals, or visual debugging across multiple parallel tabs. Standard headless scripts run invisibly in the background and fail silently when human intervention is needed.
 
-**Hermes CoBrowse** bridges autonomous AI browsing and human control inside a **live Apple-minimalist white Spatial Canvas Studio**. Every headless Chromium browser session invoked by Hermes Agent (or launched directly from the studio toolbar) streams live via Chrome DevTools Protocol (`CDP`) as a **fully draggable, dynamically resizable floating window** alongside a real-time **Inspector Studio** and **macOS-style Floating Dock**.
+**Hermes CoBrowse** bridges autonomous AI browsing and human control inside a **live minimalist white Spatial Canvas Studio** running on a separate localhost web view. Every headless Chromium browser session invoked by Hermes Agent (or launched directly from the studio toolbar) streams live via Chrome DevTools Protocol (`CDP`) as a **fully draggable, dynamically resizable floating window** alongside a real-time **Inspector Studio** and **floating Glass Dock**.
 
 Everything shown in the canvas runs end-to-end against real Playwright Chromium instances, real CDP screencasts, real WebSocket frames, and real Chromium console and network events—with zero mocked data or simulated UI state.
 
@@ -198,10 +198,11 @@ python tests/test_e2e.py
 
 In accordance with Hermes Plugin Catalog guidelines:
 
-- **Background Browser & Local Gateway:** Calling `cobrowse_open` launches headless Chromium processes via Playwright (`--disable-blink-features=AutomationControlled`, `--no-sandbox`) and starts a background FastAPI/Uvicorn WebSocket server bound strictly to loopback `127.0.0.1` (default port `9876`, auto-incremented if busy) until `cobrowse_close` is invoked without a `session_id` or the host process exits.
-- **Network Requests & Page Telemetry:** Headless Chromium visits target URLs instructed by the agent or user and streams JPEG screenshots, visible interactive DOM metadata, console logs, and HTTP request summaries in memory to local `/ws/studio` clients. No analytics, update checks, or third-party telemetry are transmitted externally.
-- **JavaScript Evaluation:** `cobrowse_eval_js` evaluates agent-supplied JavaScript inside the active browser page context only.
-- **Credentials & Unattended Runs:** The plugin reads no `.env` files, `auth.json`, OS keychains, or external browser profiles. `cobrowse_request_handoff` enforces a finite timeout (`1`–`900` seconds) and returns cleanly (`unattended_abort`) when `HERMES_UNATTENDED`, `HERMES_CRON`, or `HERMES_NONINTERACTIVE` is set without an active viewer so cron and gateway runs never hang.
+- **Authenticated Loopback Gateway (`127.0.0.1`):** Calling `cobrowse_open` starts a background FastAPI/Uvicorn WebSocket server bound strictly to loopback `127.0.0.1` (default port `9876`, auto-incremented if busy) protected by a per-run random auth token (`secrets.token_urlsafe`), strict `Host` allowlisting (`127.0.0.1`, `localhost`, `[::1]`), and exact WebSocket `Origin` verification so **only the tokened viewer** returned in `preview_url` can observe streams, call `/api/*` endpoints, dispatch inputs, or resume handoffs.
+- **Minimal Browser Process Isolation:** Headless Chromium launches via Playwright with an explicit minimal `env=` (`PATH`, `HOME`, `LANG`, display vars only on POSIX; minimal OS/temp dirs on Windows) and never inherits host API keys or Hermes provider secrets.
+- **SSRF & Scheme Guard (Off for Private Networks by Default):** Navigation and all redirect/sub-navigation hops enforce `http://` / `https://` scheme validation (`file://`, `chrome://`, `view-source:`, `data:`, and `javascript:` model inputs are refused) and block private, loopback, link-local (`169.254.169.254`), CGNAT (`100.64.0.0/10`), and IPv6 ULA/link-local addresses. Local dev targets require explicitly setting `allow_private_networks: true` in plugin settings (disabled by default).
+- **DOM Password & OTP Redaction:** `cobrowse_get_state` redacts input values as `"[redacted]"` for `type="password"` and for `autocomplete` tokens `one-time-code`, `current-password`, and `new-password`.
+- **Network Telemetry & Unattended Runs:** No external analytics, CDN assets, update checks, `.env` reads, or third-party scripts exist. `cobrowse_request_handoff` bounds waits (`1`–`900` seconds) and aborts immediately (`unattended_abort`) during Hermes cron (`current_cron_execution()`) or messaging gateway (`HERMES_SESSION_PLATFORM`) turns even if a viewer is connected.
 
 ---
 
@@ -229,7 +230,7 @@ Hermes-CoBrowse/
 │   ├── tools.py                  # Thread-safe multi-session CoBrowseManager & handlers
 │   └── web/
 │       ├── index.html            # Spatial Canvas Studio UI markup
-│       ├── style.css             # Apple-minimalist white frosted glass theme
+│       ├── style.css             # Minimalist white frosted glass theme
 │       ├── app.js                # Multi-window drag, 8-way resize, Dock, Inspector & WS client
 │       └── favicon.svg           # Minimal geometric SVG icon
 └── tests/
