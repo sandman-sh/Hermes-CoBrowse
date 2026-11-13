@@ -4,6 +4,7 @@
 
 **Multi-Window Spatial Co-Browsing Canvas & Dual-Control Automation Studio for Hermes Agent**
 
+[![Catalog](https://img.shields.io/badge/Hermes%20Catalog-hermes--cobrowse-6f42c1?style=flat-square)](https://hermes-agent.nousresearch.com/docs/plugins/hermes-cobrowse)
 [![Plugin Version](https://img.shields.io/badge/version-1.0.0-0071e3?style=flat-square)](plugin.yaml)
 [![Hermes Plugin](https://img.shields.io/badge/Hermes%20Plugin-%3E%3D0.22.0-1d1d1f?style=flat-square)](plugin.yaml)
 [![Runtime](https://img.shields.io/badge/Engine-Playwright%20%2B%20CDP-28cd41?style=flat-square)](hermes_cobrowse/engine.py)
@@ -70,16 +71,17 @@ flowchart LR
 
 ## Quick Start
 
-### Option A: Install as a Hermes Plugin (Recommended)
+### Option A: Install from the Hermes Plugin Catalog (Recommended)
 
-1. Install directly from GitHub using Hermes CLI, or clone into your local Hermes plugins directory:
+1. Install directly by name from the official Hermes catalog:
    ```bash
-   # Via Hermes CLI (GitHub URL or owner/repo shorthand)
+   hermes plugins install hermes-cobrowse
+   ```
+
+   *(Or install directly from GitHub source)*:
+   ```bash
    hermes plugins install https://github.com/sandman-sh/Hermes-CoBrowse.git
    # or: hermes plugins install sandman-sh/Hermes-CoBrowse
-
-   # Or manual drop-in clone (Windows: %LOCALAPPDATA%\hermes\plugins\hermes-cobrowse)
-   git clone https://github.com/sandman-sh/Hermes-CoBrowse.git ~/.hermes/plugins/hermes-cobrowse
    ```
 2. Enable the plugin and install Playwright's headless Chromium runtime if not already present:
    ```bash
